@@ -501,6 +501,20 @@ Potential next steps include:
 
 ---
 
+## Repository Quality
+
+This project is structured as a reproducible analytics application:
+
+- Modular source code under `src/`
+- SQL scripts versioned under `sql/`
+- Dashboard code isolated under `app/`
+- Generated reports stored under `reports/`
+- Screenshots and branding assets stored under `assets/`
+- Raw and intermediate data excluded from Git where appropriate
+- Model training and forecast generation reproducible from scripts
+
+---
+
 ## Author
 
 **Pranjal**  
