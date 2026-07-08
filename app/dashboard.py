@@ -10,6 +10,13 @@ from sqlalchemy import create_engine
 
 DATABASE_URL = "postgresql+psycopg2:///sugarbelly"
 
+# CSV exports generated from PostgreSQL SQL views.
+# These allow the dashboard to run on Streamlit Community Cloud for free.
+DASHBOARD_LATEST_PATH = Path("reports/dashboard_latest.csv")
+DASHBOARD_COUNTRY_YEAR_PATH = Path("reports/dashboard_country_year.csv")
+DASHBOARD_REGION_SUMMARY_PATH = Path("reports/dashboard_region_summary.csv")
+DASHBOARD_COUNTRY_CHANGE_PATH = Path("reports/dashboard_country_change.csv")
+
 SENSITIVITY_FORECAST_PATH = Path("reports/sugar_sensitivity_forecasts_2030.csv")
 SENSITIVITY_METRICS_PATH = Path("reports/sugar_sensitivity_metrics.csv")
 LOGO_PATH = Path("assets/sugarbelly_logo.png")
@@ -243,39 +250,65 @@ def clean_numeric_columns(df: pd.DataFrame) -> pd.DataFrame:
 
 @st.cache_data(ttl=600)
 def load_data():
-    engine = get_engine()
+    """
+    Load dashboard data.
 
-    latest = pd.read_sql(
-        """
-        SELECT *
-        FROM v_sugar_obesity_latest;
-        """,
-        engine,
+    For free Streamlit deployment, the app reads CSV exports generated
+    from PostgreSQL SQL views.
+
+    If the CSV files are not available, the app falls back to the local
+    PostgreSQL database.
+    """
+
+    csv_exports_available = all(
+        [
+            DASHBOARD_LATEST_PATH.exists(),
+            DASHBOARD_COUNTRY_YEAR_PATH.exists(),
+            DASHBOARD_REGION_SUMMARY_PATH.exists(),
+            DASHBOARD_COUNTRY_CHANGE_PATH.exists(),
+        ]
     )
 
-    country_year = pd.read_sql(
-        """
-        SELECT *
-        FROM v_sugar_obesity_country_year;
-        """,
-        engine,
-    )
+    if csv_exports_available:
+        latest = pd.read_csv(DASHBOARD_LATEST_PATH)
+        country_year = pd.read_csv(DASHBOARD_COUNTRY_YEAR_PATH)
+        region_summary = pd.read_csv(DASHBOARD_REGION_SUMMARY_PATH)
+        country_change = pd.read_csv(DASHBOARD_COUNTRY_CHANGE_PATH)
 
-    region_summary = pd.read_sql(
-        """
-        SELECT *
-        FROM v_sugar_obesity_region_summary;
-        """,
-        engine,
-    )
+    else:
+        engine = get_engine()
 
-    country_change = pd.read_sql(
-        """
-        SELECT *
-        FROM v_sugar_obesity_country_change;
-        """,
-        engine,
-    )
+        latest = pd.read_sql(
+            """
+            SELECT *
+            FROM v_sugar_obesity_latest;
+            """,
+            engine,
+        )
+
+        country_year = pd.read_sql(
+            """
+            SELECT *
+            FROM v_sugar_obesity_country_year;
+            """,
+            engine,
+        )
+
+        region_summary = pd.read_sql(
+            """
+            SELECT *
+            FROM v_sugar_obesity_region_summary;
+            """,
+            engine,
+        )
+
+        country_change = pd.read_sql(
+            """
+            SELECT *
+            FROM v_sugar_obesity_country_change;
+            """,
+            engine,
+        )
 
     if SENSITIVITY_FORECAST_PATH.exists():
         sensitivity_forecasts = pd.read_csv(SENSITIVITY_FORECAST_PATH)
@@ -295,7 +328,6 @@ def load_data():
         clean_numeric_columns(sensitivity_forecasts),
         clean_numeric_columns(sensitivity_metrics),
     )
-
 
 def metric_card(label: str, value: str):
     st.markdown(
