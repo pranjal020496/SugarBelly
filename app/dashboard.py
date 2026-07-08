@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
@@ -7,6 +9,8 @@ from sqlalchemy import create_engine
 
 
 DATABASE_URL = "postgresql+psycopg2:///sugarbelly"
+FORECAST_PATH = Path("reports/obesity_forecasts_2030.csv")
+METRICS_PATH = Path("reports/model_metrics.csv")
 
 
 st.set_page_config(
@@ -114,6 +118,14 @@ def clean_numeric_columns(df: pd.DataFrame) -> pd.DataFrame:
         "sugar_change_kg_per_capita",
         "obesity_increase_rank",
         "countries",
+        "forecast_year",
+        "forecast_obesity_pct",
+        "input_year",
+        "sugar_supply_kg_per_capita_assumption",
+        "sugar_supply_kcal_per_capita_day_assumption",
+        "mae",
+        "rmse",
+        "r2",
     ]
 
     for col in numeric_columns:
@@ -159,11 +171,23 @@ def load_data():
         engine,
     )
 
+    if FORECAST_PATH.exists():
+        forecasts = pd.read_csv(FORECAST_PATH)
+    else:
+        forecasts = pd.DataFrame()
+
+    if METRICS_PATH.exists():
+        model_metrics = pd.read_csv(METRICS_PATH)
+    else:
+        model_metrics = pd.DataFrame()
+
     return (
         clean_numeric_columns(latest),
         clean_numeric_columns(country_year),
         clean_numeric_columns(region_summary),
         clean_numeric_columns(country_change),
+        clean_numeric_columns(forecasts),
+        clean_numeric_columns(model_metrics),
     )
 
 
@@ -179,7 +203,14 @@ def metric_card(label: str, value: str):
     )
 
 
-latest_df, country_year_df, region_summary_df, country_change_df = load_data()
+(
+    latest_df,
+    country_year_df,
+    region_summary_df,
+    country_change_df,
+    forecast_df,
+    model_metrics_df,
+) = load_data()
 
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
@@ -395,7 +426,138 @@ trend_fig.update_xaxes(title_text="Year")
 
 st.plotly_chart(trend_fig, use_container_width=True)
 
+st.markdown(
+    '<div class="section-title">ML forecast to 2030</div>',
+    unsafe_allow_html=True,
+)
 
+if forecast_df.empty:
+    st.warning(
+        "Forecast file not found. Run src/models/forecast_obesity_to_2030.py to generate forecasts."
+    )
+else:
+    forecast_filtered = forecast_df[
+        forecast_df["who_region"].isin(selected_regions)
+    ].copy()
+
+    selected_forecast = forecast_df[
+        forecast_df["iso3"] == selected_iso3
+    ].sort_values("forecast_year")
+
+    forecast_col_1, forecast_col_2 = st.columns([1.2, 1])
+
+    with forecast_col_1:
+        forecast_fig = go.Figure()
+
+        forecast_fig.add_trace(
+            go.Scatter(
+                x=country_data["year"],
+                y=country_data["obesity_pct"],
+                mode="lines+markers",
+                name="Historical obesity",
+            )
+        )
+
+        if not selected_forecast.empty:
+            forecast_fig.add_trace(
+                go.Scatter(
+                    x=selected_forecast["forecast_year"],
+                    y=selected_forecast["forecast_obesity_pct"],
+                    mode="lines+markers",
+                    name="ML forecast",
+                    line=dict(dash="dash"),
+                )
+            )
+
+        forecast_fig.update_layout(
+            title=f"{selected_country}: historical obesity and ML forecast to 2030",
+            height=460,
+            margin=dict(l=0, r=0, t=50, b=0),
+            xaxis_title="Year",
+            yaxis_title="Adult obesity prevalence (%)",
+        )
+
+        st.plotly_chart(forecast_fig, use_container_width=True)
+
+    with forecast_col_2:
+        forecast_2030 = forecast_filtered[
+            forecast_filtered["forecast_year"] == 2030
+        ].copy()
+
+        top_2030 = forecast_2030.sort_values(
+            "forecast_obesity_pct",
+            ascending=False,
+        ).head(10)
+
+        fig_2030 = px.bar(
+            top_2030.sort_values("forecast_obesity_pct"),
+            x="forecast_obesity_pct",
+            y="country",
+            orientation="h",
+            title="Highest forecast obesity prevalence, 2030",
+            labels={
+                "forecast_obesity_pct": "Forecast obesity prevalence (%)",
+                "country": "",
+            },
+        )
+
+        fig_2030.update_layout(
+            height=460,
+            margin=dict(l=0, r=0, t=50, b=0),
+        )
+
+        st.plotly_chart(fig_2030, use_container_width=True)
+
+    forecast_metric_col_1, forecast_metric_col_2, forecast_metric_col_3 = st.columns(3)
+
+    if not selected_forecast.empty:
+        selected_2030_value = selected_forecast[
+            selected_forecast["forecast_year"] == 2030
+        ]["forecast_obesity_pct"]
+
+        if not selected_2030_value.empty:
+            with forecast_metric_col_1:
+                metric_card(
+                    f"{selected_country} forecast obesity in 2030",
+                    f"{selected_2030_value.iloc[0]:.2f}%",
+                )
+
+    if not model_metrics_df.empty:
+        best_model_row = model_metrics_df.sort_values("mae").iloc[0]
+
+        with forecast_metric_col_2:
+            metric_card(
+                "Best forecast model",
+                str(best_model_row["model"]),
+            )
+
+        with forecast_metric_col_3:
+            metric_card(
+                "Best model MAE",
+                f"{best_model_row['mae']:.3f}",
+            )
+
+    with st.expander("View model evaluation results"):
+        if model_metrics_df.empty:
+            st.info("Model metrics file not found.")
+        else:
+            st.dataframe(
+                model_metrics_df.round(3),
+                use_container_width=True,
+            )
+
+    st.markdown(
+        """
+        <div class="note">
+            <strong>Forecast note:</strong> The 2030 forecast uses the trained Linear Regression
+            model selected during model evaluation. Future sugar availability is held constant at
+            the latest observed country-level value, creating a baseline constant-sugar scenario.
+            Forecasts are scenario estimates, not guaranteed future outcomes.
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    
 st.markdown(
     '<div class="section-title">Rankings</div>',
     unsafe_allow_html=True,
